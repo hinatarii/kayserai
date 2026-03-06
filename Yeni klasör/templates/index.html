@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <link rel="manifest" href="/static/manifest.json">
+    <meta name="theme-color" content="#09090b">
+    <title>KayserAI</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/highlight.min.js"></script>
+    
+    <style>
+        /* Kilit mekanizması: Ekran asla taşmasın, klavye açılsa bile içeride kalsın */
+        body, html { 
+            height: 100%; 
+            margin: 0; 
+            overflow: hidden; 
+        }
+        .app-container { 
+            height: 100dvh; /* Dinamik Viewport Yüksekliği */
+            display: flex;
+            flex-direction: column;
+        }
+    </style>
+</head>
+<body class="bg-zinc-950 text-white">
+
+    <div class="app-container">
+        <header class="flex items-center p-4 bg-zinc-900 border-b border-zinc-800 shrink-0">
+            <button onclick="toggleSidebar()" class="md:hidden p-2">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path></svg>
+            </button>
+            <h1 class="ml-4 font-bold">KayserAI</h1>
+        </header>
+
+        <div class="flex flex-1 overflow-hidden">
+            <aside id="sidebar" class="fixed inset-y-0 left-0 w-64 bg-zinc-900 border-r border-zinc-800 transform -translate-x-full transition-transform duration-300 z-50 md:relative md:translate-x-0 flex flex-col p-4 shadow-2xl">
+                <button onclick="newChat()" class="w-full bg-blue-600 p-3 rounded-xl mb-4 hover:bg-blue-500 transition font-bold">+ Yeni Sohbet</button>
+                <div id="chat-list" class="flex-1 overflow-y-auto space-y-2"></div>
+                <button onclick="toggleSidebar()" class="md:hidden mt-4 w-full p-2 text-zinc-500 border border-zinc-800 rounded">Kapat</button>
+            </aside>
+
+            <main class="flex-1 flex flex-col w-full overflow-hidden">
+                <div id="chat-box" class="flex-1 overflow-y-auto p-4 space-y-6"></div>
+                
+                <div class="p-4 bg-zinc-950 shrink-0">
+                    <div class="relative w-full">
+                        <input id="input" type="text" class="w-full p-4 bg-zinc-900 rounded-xl border border-zinc-700 outline-none focus:border-blue-500 pr-16" placeholder="Yaz...">
+                        <button onclick="sendMessage()" class="absolute right-2 top-2 bg-blue-600 p-2 rounded-lg hover:bg-blue-500">Gönder</button>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+<script>
+    let currentChatId = null;
+    let isGenerating = false;
+
+    function toggleSidebar() { document.getElementById('sidebar').classList.toggle('-translate-x-full'); }
+    function newChat() { location.reload(); }
+
+    async function loadChats() {
+        const res = await fetch('/api/chats');
+        const list = await res.json();
+        document.getElementById('chat-list').innerHTML = list.map(c => `
+            <div class="flex justify-between items-center p-2 hover:bg-zinc-800 rounded cursor-pointer group">
+                <span class="truncate text-sm" onclick="loadHistory(${c.id})">${c.title}</span>
+                <button onclick="deleteChat(${c.id})" class="text-zinc-600 group-hover:text-red-500">🗑️</button>
+            </div>`).join('');
+    }
+
+    async function deleteChat(id) {
+        event.stopPropagation();
+        await fetch(`/api/delete/${id}`, { method: 'DELETE' });
+        if(currentChatId == id) location.reload();
+        loadChats();
+    }
+
+    async function loadHistory(id) {
+        currentChatId = id;
+        document.getElementById('chat-box').innerHTML = "";
+        const res = await fetch(`/api/history/${id}`);
+        const history = await res.json();
+        history.forEach(m => {
+            const div = document.createElement('div');
+            div.className = m.role == 'user' ? 'text-right text-blue-400' : 'prose prose-invert max-w-none';
+            div.innerHTML = m.role == 'user' ? m.content : marked.parse(m.content);
+            document.getElementById('chat-box').appendChild(div);
+        });
+        hljs.highlightAll();
+        if(window.innerWidth < 768) toggleSidebar();
+    }
+
+    async function sendMessage() {
+        if (isGenerating) return;
+        const input = document.getElementById('input');
+        if (!input.value) return;
+
+        const msg = input.value; input.value = "";
+        isGenerating = true;
+        
+        document.getElementById('chat-box').innerHTML += `<div class="text-right text-blue-400">Sen: ${msg}</div>`;
+        const aiDiv = document.createElement('div');
+        aiDiv.className = "prose prose-invert max-w-none";
+        document.getElementById('chat-box').appendChild(aiDiv);
+
+        const res = await fetch('/api/chat', { 
+            method: 'POST', 
+            headers: {'Content-Type': 'application/json'}, 
+            body: JSON.stringify({message: msg, chat_id: currentChatId}) 
+        });
+        const data = await res.json();
+        currentChatId = data.chat_id;
+
+        aiDiv.innerHTML = marked.parse(data.reply);
+        hljs.highlightAll();
+        isGenerating = false; 
+        loadChats();
+        document.getElementById('chat-box').scrollTop = document.getElementById('chat-box').scrollHeight;
+    }
+
+    document.getElementById('input').addEventListener('keydown', (e) => { if(e.key === 'Enter') sendMessage(); });
+    loadChats();
+
+    if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/static/service-worker.js')
+        .then(() => console.log('PWA Servisi kuruldu!'));
+    }
+</script>
+</body>
+</html>
