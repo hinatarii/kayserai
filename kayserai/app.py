@@ -1,10 +1,15 @@
+import os
 from flask import Flask, render_template, request, jsonify
 from google import genai
 import sqlite3
 import datetime
 
 app = Flask(__name__)
-client = genai.Client(api_key="AIzaSyBZ6Qip3kX4qYO8YmlNNlgCLSjjQ8tUl78")
+
+# API anahtarını kodun içine yazmıyoruz, Render'dan alacağız!
+api_key = os.environ.get("API_KEY")
+client = genai.Client(api_key=api_key)
+
 MODELS = ["gemini-2.5-flash", "gemini-3-flash-preview", "gemini-2.5-flash-lite"]
 
 def init_db():
@@ -47,6 +52,10 @@ def chat():
     data = request.json
     chat_id = data.get('chat_id')
     user_msg = data.get('message')
+    
+    if not api_key:
+        return jsonify({'reply': "Hata: API Anahtarı tanımlanmamış!", 'chat_id': 0})
+
     conn = sqlite3.connect('kayserai.db')
     if not chat_id:
         c = conn.cursor()
@@ -69,5 +78,4 @@ def chat():
     return jsonify({'reply': ai_msg, 'chat_id': chat_id})
 
 if __name__ == '__main__':
-    # host='0.0.0.0' kodu, uygulamanı dış dünyaya (yani Wi-Fi'na) açar
     app.run(host='0.0.0.0', port=5000, debug=True)
